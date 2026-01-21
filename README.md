@@ -1,0 +1,1 @@
+# app-migrator-openspec-claude
