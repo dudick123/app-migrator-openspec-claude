@@ -8,7 +8,6 @@ import pytest
 from argocd_migrator.exceptions import ParserError
 from argocd_migrator.parser import parse_yaml_file
 
-
 VALID_APP = """
 apiVersion: argoproj.io/v1alpha1
 kind: Application

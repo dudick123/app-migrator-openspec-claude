@@ -9,7 +9,6 @@ import pytest
 from argocd_migrator.exceptions import ValidationError
 from argocd_migrator.validator import load_schema, validate_json
 
-
 VALID_APP = {
     "apiVersion": "argoproj.io/v1alpha1",
     "kind": "Application",

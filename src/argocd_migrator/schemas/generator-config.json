@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ApplicationSet Generator Configuration Array",
+  "description": "JSON Schema for ApplicationSet generator configuration (array of simplified application configs)",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["metadata", "project", "source", "destination"],
+    "properties": {
+      "metadata": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Application name"
+          },
+          "annotations": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Application annotations"
+          },
+          "labels": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Application labels"
+          }
+        },
+        "additionalProperties": false
+      },
+      "project": {
+        "type": "string",
+        "description": "ArgoCD project name"
+      },
+      "source": {
+        "type": "object",
+        "required": ["repoURL"],
+        "properties": {
+          "repoURL": {
+            "type": "string",
+            "description": "Git repository URL"
+          },
+          "revision": {
+            "type": "string",
+            "description": "Git revision (branch, tag, or commit)"
+          },
+          "manifestPath": {
+            "type": "string",
+            "description": "Path within repository"
+          },
+          "directory": {
+            "type": "object",
+            "description": "Directory-specific options",
+            "properties": {
+              "recurse": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": true
+          },
+          "helm": {
+            "type": "object",
+            "description": "Helm-specific options"
+          },
+          "kustomize": {
+            "type": "object",
+            "description": "Kustomize-specific options"
+          }
+        },
+        "additionalProperties": true
+      },
+      "destination": {
+        "type": "object",
+        "required": ["clusterName"],
+        "properties": {
+          "clusterName": {
+            "type": "string",
+            "description": "Target cluster name"
+          },
+          "namespace": {
+            "type": "string",
+            "description": "Target namespace for deployment"
+          }
+        },
+        "additionalProperties": false
+      },
+      "enableSyncPolicy": {
+        "type": "boolean",
+        "description": "Whether automated sync policy is enabled"
+      }
+    },
+    "additionalProperties": false
+  }
+}

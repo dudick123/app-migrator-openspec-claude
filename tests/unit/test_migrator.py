@@ -4,8 +4,6 @@ import json
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from argocd_migrator.migrator import convert_yaml_to_json, migrate_to_json
 
 

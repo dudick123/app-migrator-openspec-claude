@@ -1,15 +1,18 @@
 # ArgoCD Application Migrator
 
-A Python CLI tool for migrating ArgoCD Application manifests from YAML to JSON configuration format using a robust 4-stage pipeline architecture.
+A Python CLI tool for migrating ArgoCD Application manifests from YAML to ApplicationSet generator configuration format using a robust pipeline architecture.
 
 ## Features
 
-- **4-Stage Pipeline**: Scanner → Parser → Migrator → Validator
-- **Batch Processing**: Migrate entire directories of YAML files
-- **JSON Schema Validation**: Ensures output conforms to ArgoCD Application schema
+- **Aggregated Output**: Combines all applications into a single `config.json` array
+- **ApplicationSet Generator Format**: Transforms to simplified generator config format
+- **4-Stage Pipeline**: Scanner → Parser → Transformer → Aggregator → Validator
+- **Batch Processing**: Process entire directories of YAML files
+- **Field Mapping**: Automatic transformation (targetRevision → revision, path → manifestPath)
+- **Validation**: Ensures output conforms to generator config schema
 - **Error Handling**: Clear error messages with detailed failure reporting
 - **Type-Safe**: Full type hints and mypy strict mode
-- **Well-Tested**: >80% code coverage with unit and integration tests
+- **Well-Tested**: Comprehensive unit and integration test coverage
 
 ## Installation
 
@@ -42,41 +45,48 @@ uv pip install -e ".[dev]"
 
 ### Basic Migration
 
-Migrate all ArgoCD Application YAML files in a directory:
+Migrate all ArgoCD Application YAML files to aggregated ApplicationSet generator config:
 
 ```bash
-argocd-migrator migrate /path/to/yaml/files
+argocd-migrator migrate --input-path /path/to/yaml/files
 ```
 
 This will:
 1. Scan the directory for `*.yaml` and `*.yml` files
 2. Parse each file as an ArgoCD Application
-3. Convert to JSON format
-4. Validate against JSON Schema
-5. Write output to `./output/` directory
+3. Transform to ApplicationSet generator config format
+4. Aggregate all configs into a single array
+5. Validate the aggregated config
+6. Write output to `config.json` (default)
 
-### Specify Output Directory
+### Specify Output File
 
 ```bash
-argocd-migrator migrate /path/to/yaml/files --output /path/to/output
+argocd-migrator migrate --input-path /path/to/yaml/files --output-file my-config.json
+```
+
+### Short Form
+
+```bash
+argocd-migrator migrate -i /path/to/yaml/files -o my-config.json
 ```
 
 ### Skip Validation
 
 ```bash
-argocd-migrator migrate /path/to/yaml/files --no-validate
+argocd-migrator migrate --input-path /path/to/yaml/files --no-validate
 ```
 
 ### Verbose Output
 
 ```bash
-argocd-migrator migrate /path/to/yaml/files --verbose
+argocd-migrator migrate --input-path /path/to/yaml/files --verbose
 ```
 
 ### Quiet Mode
 
 ```bash
-argocd-migrator migrate /path/to/yaml/files --quiet
+argocd-migrator migrate --input-path /path/to/yaml/files --quiet
 ```
 
 ### View Version
@@ -97,18 +107,29 @@ Parses YAML files and validates they are valid ArgoCD Applications by checking:
 - Required fields `metadata` and `spec` are present
 - `metadata.name` is defined
 
-### Stage 3: Migrator
-Converts parsed YAML data to JSON format with:
-- 1:1 field mapping (no data loss)
-- Proper JSON formatting (2-space indentation)
-- UTF-8 encoding
-- Trailing newline
+### Stage 3: Transformer
+Transforms ArgoCD Application to ApplicationSet generator config format:
+- **Field Mappings**:
+  - `spec.source.targetRevision` → `source.revision`
+  - `spec.source.path` → `source.manifestPath`
+  - `spec.destination.server` → `destination.clusterName`
+  - `spec.syncPolicy` → `enableSyncPolicy` (boolean)
+- **Metadata Transformation**:
+  - Extracts `argocd.argoproj.io/sync-wave` → `annotations.syncWave`
+  - Adds `annotations.enablePrune` (default: false)
+  - Preserves labels
+- **Simplification**:
+  - Removes `apiVersion` and `kind`
+  - Flattens project to top-level
 
-### Stage 4: Validator
-Validates JSON output against JSON Schema to ensure:
-- Correct structure and required fields
+### Stage 4: Aggregator
+Collects all transformed configs into a single JSON array.
+
+### Stage 5: Validator
+Validates aggregated config array against generator config schema to ensure:
+- Correct array structure
+- Required fields present in each config
 - Valid data types
-- ArgoCD Application compliance
 
 ## Supported ArgoCD Versions
 
@@ -116,13 +137,17 @@ Validates JSON output against JSON Schema to ensure:
 
 ## Example
 
-**Input** (`example-app.yaml`):
+**Input** (`app-1.yaml`):
 ```yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: my-application
   namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  labels:
+    team: platform
 spec:
   project: default
   source:
@@ -132,37 +157,83 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: production
+  syncPolicy:
+    automated:
+      prune: true
 ```
 
-**Output** (`example-app.json`):
+**Output** (`config.json`):
 ```json
-{
-  "apiVersion": "argoproj.io/v1alpha1",
-  "kind": "Application",
-  "metadata": {
-    "name": "my-application",
-    "namespace": "argocd"
-  },
-  "spec": {
+[
+  {
+    "metadata": {
+      "name": "my-application",
+      "annotations": {
+        "syncWave": "10",
+        "enablePrune": false
+      },
+      "labels": {
+        "team": "platform"
+      }
+    },
     "project": "default",
     "source": {
       "repoURL": "https://github.com/example/repo.git",
-      "targetRevision": "main",
-      "path": "manifests/"
+      "revision": "main",
+      "manifestPath": "manifests/"
     },
     "destination": {
-      "server": "https://kubernetes.default.svc",
+      "clusterName": "in-cluster",
       "namespace": "production"
-    }
+    },
+    "enableSyncPolicy": true
   }
-}
+]
 ```
+
+**Note**: The output is an array containing all discovered applications, not individual files.
+
+## Breaking Changes from v0.1.0
+
+Version 1.0.0 introduces significant breaking changes:
+
+### CLI Changes
+- **Parameter renamed**: `source` (positional) → `--input-path` (option)
+- **Parameter renamed**: `--output` → `--output-file`
+- **Required parameter**: `--input-path` is now required (use `-i` shorthand)
+
+### Output Format Changes
+- **Multiple files → Single file**: Output is now a single `config.json` instead of individual JSON files
+- **Full ArgoCD spec → Generator config**: Output uses simplified ApplicationSet generator config format
+- **Field transformations**:
+  - `targetRevision` → `revision`
+  - `path` → `manifestPath`
+  - `server` → `clusterName`
+  - `apiVersion` and `kind` fields removed from output
+
+### Migration Guide from v0.1.0
+
+**Old (v0.1.0)**:
+```bash
+argocd-migrator migrate /path/to/yaml --output /path/to/output
+# Output: /path/to/output/app-1.json, /path/to/output/app-2.json, etc.
+```
+
+**New (v1.0.0)**:
+```bash
+argocd-migrator migrate --input-path /path/to/yaml --output-file config.json
+# Output: config.json (single aggregated array)
+```
+
+If you need the old behavior, please use v0.1.0.
 
 ## Known Limitations
 
 - **YAML Anchors/Aliases**: Not supported (JSON doesn't support references)
-- **ArgoCD ApplicationSets**: Not supported (future scope)
-- **Other Kubernetes Resources**: Only ArgoCD Applications are migrated
+- **Single Directory**: Can only process one directory at a time
+- **All-or-Nothing**: If any application fails transformation, no output is generated
+- **Cluster Name Mapping**: Simple mapping from server URL (configurable mapping planned for future)
+- **Other Kubernetes Resources**: Only ArgoCD Applications are migrated (ApplicationSets not supported)
 
 ## Development
 

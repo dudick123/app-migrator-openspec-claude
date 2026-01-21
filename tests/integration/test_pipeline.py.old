@@ -4,10 +4,7 @@ import json
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from argocd_migrator.pipeline import migrate_file, run_pipeline
-
 
 VALID_APP_YAML = """
 apiVersion: argoproj.io/v1alpha1
