@@ -1,0 +1,137 @@
+"""Integration tests for the full pipeline."""
+
+import json
+import tempfile
+from pathlib import Path
+
+from argocd_migrator.pipeline import migrate_file, run_pipeline
+
+VALID_APP_YAML = """
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: integration-test-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/example/repo.git
+    targetRevision: main
+    path: k8s/
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: production
+"""
+
+INVALID_APP_YAML = """
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: not-an-app
+data:
+  key: value
+"""
+
+
+def test_migrate_single_file():
+    """Test migrating a single file through the pipeline."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+
+        # Create source file
+        source_file = tmp_path / "app.yaml"
+        source_file.write_text(VALID_APP_YAML)
+
+        # Create output directory
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        # Migrate
+        result = migrate_file(source_file, output_dir, validate=True)
+
+        assert result.success
+        assert result.output_file is not None
+        assert result.output_file.exists()
+        assert result.error is None
+
+        # Verify JSON content
+        with open(result.output_file) as f:
+            data = json.load(f)
+        assert data["kind"] == "Application"
+        assert data["metadata"]["name"] == "integration-test-app"
+
+
+def test_migrate_file_with_invalid_yaml():
+    """Test that invalid files are handled gracefully."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+
+        # Create invalid source file
+        source_file = tmp_path / "invalid.yaml"
+        source_file.write_text(INVALID_APP_YAML)
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        # Migrate should fail but not crash
+        result = migrate_file(source_file, output_dir, validate=True)
+
+        assert not result.success
+        assert result.error is not None
+        assert "not an ArgoCD Application" in result.error
+
+
+def test_run_pipeline_on_directory():
+    """Test running the full pipeline on a directory."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+
+        # Create multiple source files
+        (tmp_path / "app1.yaml").write_text(VALID_APP_YAML)
+        (tmp_path / "app2.yaml").write_text(VALID_APP_YAML)
+        (tmp_path / "invalid.yaml").write_text(INVALID_APP_YAML)
+
+        # Create output directory
+        output_dir = tmp_path / "output"
+
+        # Run pipeline
+        result = run_pipeline(tmp_path, output_dir, validate=True)
+
+        assert result.total == 3
+        assert result.successful == 2
+        assert result.failed == 1
+        assert len(result.results) == 3
+
+        # Verify output files exist for successful migrations
+        assert (output_dir / "app1.json").exists()
+        assert (output_dir / "app2.json").exists()
+
+
+def test_run_pipeline_empty_directory():
+    """Test pipeline handles empty directories gracefully."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        output_dir = tmp_path / "output"
+
+        result = run_pipeline(tmp_path, output_dir)
+
+        assert result.total == 0
+        assert result.successful == 0
+        assert result.failed == 0
+
+
+def test_pipeline_creates_output_directory():
+    """Test that pipeline creates output directory if it doesn't exist."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+
+        # Create source file
+        (tmp_path / "app.yaml").write_text(VALID_APP_YAML)
+
+        # Don't create output directory - let pipeline do it
+        output_dir = tmp_path / "nonexistent" / "output"
+
+        result = run_pipeline(tmp_path, output_dir)
+
+        assert output_dir.exists()
+        assert result.successful == 1
